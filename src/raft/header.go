@@ -59,38 +59,39 @@ type ApplyMsg struct {
 |                                                          |
 `**********************************************************/
 
-type AppendEntries struct {
-	term         int        // leader's term
-	leaderId     int        // so follower can redirect clients
-	prevLogIndex int        // index of log entry immediately preceding new ones
-	prevLogTerm  int        // term of prevLogIndex entry
-	entries      []LogEntry //log entries to store (empty for heartbeat; may send more than one for efficiency)
-	leaderCommit int        //leader's commit index
+type AppendEntriesArgs struct {
+	Term         int        // leader's term
+	LeaderId     int        // so follower can redirect clients
+	PrevLogIndex int        // index of log entry immediately preceding new ones
+	PrevLogTerm  int        // term of prevLogIndex entry
+	Entries      []LogEntry //log entries to store (empty for heartbeat; may send more than one for efficiency)
+	LeaderCommit int        //leader's commit index
 }
 
 type AppendEntriesReply struct {
-	term    int  // currentTerm, for leader to update itself
-	succeed bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+	Term         int  // currentTerm, for leader to update itself
+	Succeed      bool // true if follower contained entry matching prevLogIndex and prevLogTerm
+	NextTryIndex int  // the next attempt index for appending
 }
 
 type RequestVoteArgs struct {
 	// Your data here (2A, 2B).
-	term         int // candidate’s term
-	candidateId  int // candidate requesting vote
-	lastLogIndex int // index of candidate’s last log entry
-	lastLogTerm  int // term of candidate’s last log entry
+	Term         int // candidate’s term
+	CandidateId  int // candidate requesting vote
+	LastLogIndex int // index of candidate’s last log entry
+	LastLogTerm  int // term of candidate’s last log entry
 }
 
 type RequestVoteReply struct {
 	// Your data here (2A).
-	term        int  // currentTerm, for candidate to update itself
-	voteGranted bool // true means candidate received vote
+	Term        int  // currentTerm, for candidate to update itself
+	VoteGranted bool // true means candidate received vote
 }
 
 type LogEntry struct {
 	LogIndex int
 	LogTerm  int
-	command  interface{}
+	Command  interface{}
 }
 
 type PersistState struct {
@@ -126,5 +127,7 @@ type Raft struct {
 	volStateOnLdr VolatileStateOnLeaders // Volatile State On Leaders
 	applyCh       chan ApplyMsg          // apply to client
 	heartBeat     chan struct{}          // heart beat channel
+	winElection   chan struct{}          // win election channel
+	grantVote     chan struct{}          // vote channel
 	shutDown      chan struct{}          // shutDown channel
 }
