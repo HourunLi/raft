@@ -3,7 +3,7 @@ package raft
 import "log"
 
 // Debugging
-const Debug = false
+const Debug = true
 
 func DPrintf(format string, a ...interface{}) (n int, err error) {
 	if Debug {
@@ -12,13 +12,13 @@ func DPrintf(format string, a ...interface{}) (n int, err error) {
 	return
 }
 
-func AssertEqual(a interface{}, b interface{}, msg string) {
+func AssertEqual(a interface{}, b interface{}, msg string) bool {
 	if Debug {
 		if a != b {
 			log.Printf(msg)
 		}
 	}
-	return
+	return a == b
 }
 
 func (rf *Raft) getLastLogTerm() int {

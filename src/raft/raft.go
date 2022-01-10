@@ -186,8 +186,12 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
-	AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n")
-	AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n")
+	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
+		return ok
+	}
+	if !AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") {
+		return ok
+	}
 	if ok {
 		if reply.Term > rf.perState.currentTerm {
 			rf.serverState = Follower
@@ -202,6 +206,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 					rf.serverState = Leader
 					rf.volStateOnLdr = VolatileStateOnLeaders{}
 					tmp := len(rf.perState.logs)
+					DPrintf("%d\n", tmp)
 					for i := range rf.peers {
 						rf.volStateOnLdr.nextIndex[i] = tmp
 					}
@@ -214,7 +219,9 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) sendRequestVotes() {
-	AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n")
+	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
+		return
+	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	requestVoteArgs := &RequestVoteArgs{}
@@ -287,8 +294,12 @@ func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.appendEntries", args, reply)
-	AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n")
-	AssertEqual(rf.perState.currentTerm, args.Term, "rf's current term should be equal to args term\n")
+	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") {
+		return ok
+	}
+	if !AssertEqual(rf.perState.currentTerm, args.Term, "rf's current term should be equal to args term\n") {
+		return ok
+	}
 	if !ok {
 		DPrintf("sendAppendEntriesSignal Failed\n")
 	}
@@ -330,20 +341,23 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 // Leader send append entries to the followers
 //
 func (rf *Raft) sendAppendEntriesSignals() {
-	AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n")
+	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") {
+		return
+	}
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	for server := range rf.peers {
-		if server != rf.me {
-			args := &AppendEntriesArgs{}
-			args.Term = rf.perState.currentTerm
-			args.LeaderId = rf.me
-			args.PrevLogIndex = rf.volStateOnLdr.nextIndex[server] - 1
-			args.PrevLogTerm = rf.perState.logs[args.PrevLogIndex].LogTerm
-			args.Entries = rf.perState.logs[rf.volStateOnLdr.nextIndex[server]:]
-			args.LeaderCommit = rf.volStateOnSer.commitIndex
-			go rf.sendAppendEntriesSignal(server, args, &AppendEntriesReply{})
+		if server == rf.me {
+			continue
 		}
+		args := &AppendEntriesArgs{}
+		args.Term = rf.perState.currentTerm
+		args.LeaderId = rf.me
+		args.PrevLogIndex = rf.volStateOnLdr.nextIndex[server] - 1
+		args.PrevLogTerm = rf.perState.logs[args.PrevLogIndex].LogTerm
+		args.Entries = rf.perState.logs[rf.volStateOnLdr.nextIndex[server]:]
+		args.LeaderCommit = rf.volStateOnSer.commitIndex
+		go rf.sendAppendEntriesSignal(server, args, &AppendEntriesReply{})
 	}
 	return
 }
@@ -416,9 +430,12 @@ func (rf *Raft) ticker() {
 			time.Sleep(AppendEntryInterval)
 		case Follower:
 			select {
+			case <-rf.grantVote:
 			case <-rf.heartBeat:
 			case <-time.After(electionTimeout()):
+				rf.mu.Lock()
 				rf.serverState = Candidate
+				rf.mu.Unlock()
 			}
 		case Candidate:
 			rf.mu.Lock()
@@ -426,11 +443,13 @@ func (rf *Raft) ticker() {
 			rf.perState.currentTerm++
 			rf.perState.voteCnt = 1
 			rf.mu.Unlock()
-			rf.sendRequestVotes() // send request votes
+			go rf.sendRequestVotes() // send request votes
 
 			select {
 			case <-rf.heartBeat:
+				rf.mu.Lock()
 				rf.serverState = Follower
+				rf.mu.Unlock()
 			case <-rf.winElection:
 			case <-time.After(electionTimeout()):
 			}
@@ -457,6 +476,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.me = me
 	rf.leaderId = -1
 	//for persistent state
+	rf.serverState = Follower
 	rf.perState.currentTerm = 0
 	rf.perState.voteFor = -1
 	rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: 0, LogTerm: 0}) // padding
