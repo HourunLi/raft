@@ -3,9 +3,9 @@ package raft
 /******************************************************.
 |                The structure of logs                 |
 |------------------------------------------------------|
-|	LogIndex      0         1         2       ...      |
-|	LogTerm       0         ?         ?       ...      |
-|	Command    padding    command   command   ...      |
+|   LogIndex      0         1         2       ...      |
+|   LogTerm       0         ?         ?       ...      |
+|   Command    padding    command   command   ...      |
 `******************************************************/
 
 //
