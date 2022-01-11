@@ -28,6 +28,7 @@ package raft
 import (
 	//	"bytes"
 
+	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -53,8 +54,8 @@ func (rf *Raft) getNextTryIndex() int {
 func (rf *Raft) argsIsUpToDate(args *RequestVoteArgs) bool {
 	lastTerm := rf.getLastLogTerm()
 	lastIndex := rf.getLastLogIndex()
-	if lastTerm < args.Term ||
-		(lastTerm == args.Term && lastIndex <= args.LastLogIndex) {
+	if lastTerm < args.LastLogTerm ||
+		(lastTerm == args.LastLogTerm && lastIndex <= args.LastLogIndex) {
 		return true
 	}
 	return false
@@ -65,6 +66,8 @@ func (rf *Raft) argsIsUpToDate(args *RequestVoteArgs) bool {
 func (rf *Raft) GetState() (int, bool) {
 	var term int
 	var isleader bool
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	// Your code here (2A).
 	term = rf.perState.currentTerm
 	isleader = rf.serverState == Leader
@@ -134,7 +137,7 @@ func (rf *Raft) applyLogs() {
 
 	for i := rf.volStateOnSer.applyIndex + 1; i <= rf.volStateOnSer.commitIndex; i++ {
 		msg := ApplyMsg{CommandValid: true, CommandIndex: i, Command: rf.perState.logs[i].Command}
-		if i > 0 {
+		if AssertBigger(i, 0, "applyIndex should larger than zero\n") {
 			rf.applyCh <- msg
 		}
 		rf.volStateOnSer.applyIndex = i
@@ -209,12 +212,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
+	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") ||
+		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") {
 		return ok
 	}
-	if !AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") {
-		return ok
-	}
+
 	if ok {
 		if reply.Term > rf.perState.currentTerm {
 			rf.serverState = Follower
@@ -228,15 +230,15 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			if reply.VoteGranted {
 				rf.perState.voteCnt++
 				if rf.perState.voteCnt > len(rf.peers)/2 {
-					rf.serverState = Leader
 					// rf.volStateOnLdr = VolatileStateOnLeaders{}
 					rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
 					rf.volStateOnLdr.nextIndex = make([]int, len(rf.peers))
 					tmp := rf.getNextTryIndex()
-					DPrintf("%d\n", tmp)
 					for i := range rf.peers {
 						rf.volStateOnLdr.nextIndex[i] = tmp
+						AssertNotEqual(rf.volStateOnLdr.nextIndex[i], 0, "rf.volStateOnLdr.nextIndex[i] is zero")
 					}
+					rf.serverState = Leader
 					rf.winElection <- struct{}{}
 				}
 			}
@@ -248,7 +250,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 func (rf *Raft) sendRequestVotes() {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
+	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") || rf.killed() {
 		return
 	}
 	requestVoteArgs := &RequestVoteArgs{}
@@ -261,10 +263,11 @@ func (rf *Raft) sendRequestVotes() {
 			go rf.sendRequestVote(server, requestVoteArgs, &RequestVoteReply{})
 		}
 	}
+	return
 }
 
 // candidate: get the heartbeat, switch identity to follower and fresh term etc.
-func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
+func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 
@@ -273,6 +276,7 @@ func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		reply.Term = rf.perState.currentTerm
 		reply.Succeed = false
 		reply.NextTryIndex = rf.getNextTryIndex()
+		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 279\n")
 		return
 	}
 
@@ -292,11 +296,13 @@ func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// then set leader's try index straightly to rf(follower) logs' tail
 	if args.PrevLogIndex > rf.getLastLogIndex() {
 		reply.NextTryIndex = rf.getNextTryIndex()
+		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 299\n")
 		reply.Succeed = false
 		return
 	}
 
-	// bypass the inconsistent entries of the same term every time
+	// If the term is inconsistent, then the entries in this term is also inconsistent
+	// So bypass all the entries in the inconsistent term every time to speed up
 	if args.PrevLogIndex > 0 && args.PrevLogTerm != rf.perState.logs[args.PrevLogIndex].LogTerm {
 		term := rf.perState.logs[args.PrevLogIndex].LogTerm
 		for i := args.PrevLogIndex; i >= 0; i-- {
@@ -311,7 +317,7 @@ func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 		rf.perState.logs = append(rf.perState.logs, args.Entries...)
 		reply.Succeed = true
 		reply.NextTryIndex = rf.getNextTryIndex()
-
+		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 320\n")
 		if rf.volStateOnSer.commitIndex < args.LeaderCommit {
 			rf.volStateOnSer.commitIndex = Min(args.LeaderCommit, rf.getLastLogIndex())
 			go rf.applyLogs()
@@ -321,33 +327,50 @@ func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 }
 
 func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
-	ok := rf.peers[server].Call("Raft.appendEntries", args, reply)
-	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") {
+	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
+	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") ||
+		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's current term should be equal to args term\n") ||
+		rf.killed() {
 		return ok
 	}
-	if !AssertEqual(rf.perState.currentTerm, args.Term, "rf's current term should be equal to args term\n") {
-		return ok
-	}
+
 	if !ok {
 		DPrintf("sendAppendEntriesSignal Failed\n")
+		return ok
 	}
+
+	if Debug {
+		fmt.Printf("sendAppendEntriesSignal to %d\n", server)
+		dumpArgs(*args)
+		dumpArgs(*reply)
+	}
+	// Network partition may need this branch to handle
+	// Update the term and switch its serverState
 	if reply.Term > rf.perState.currentTerm {
 		rf.serverState = Follower
 		rf.perState.voteFor = -1
 		rf.perState.currentTerm = reply.Term
 		return ok
 	}
-
-	if reply.Succeed {
-		lens := len(args.Entries)
-		if lens > 0 {
-			rf.volStateOnLdr.nextIndex[server] = args.Entries[lens-1].LogIndex + 1
-			rf.volStateOnLdr.matchIndex[server] = args.Entries[lens-1].LogIndex
+	if reply.Term == rf.perState.currentTerm {
+		if reply.Succeed {
+			lens := len(args.Entries)
+			if lens > 0 {
+				rf.volStateOnLdr.nextIndex[server] = args.Entries[lens-1].LogIndex + 1
+				AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
+				rf.volStateOnLdr.matchIndex[server] = args.Entries[lens-1].LogIndex
+			}
+		} else {
+			DPrintf("set next try index \n")
+			rf.volStateOnLdr.nextIndex[server] = Min(reply.NextTryIndex, rf.getNextTryIndex())
+			rf.volStateOnLdr.nextIndex[server] = Max(1, rf.volStateOnLdr.nextIndex[server])
+			AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
 		}
-	} else {
-		rf.volStateOnLdr.nextIndex[server] = reply.NextTryIndex
 	}
 
+	// check commit index
 	for cmtIndex := rf.getLastLogIndex(); cmtIndex > rf.volStateOnSer.commitIndex &&
 		rf.perState.logs[cmtIndex].LogTerm == rf.perState.currentTerm; cmtIndex-- {
 		cnt := 1
@@ -381,6 +404,10 @@ func (rf *Raft) sendAppendEntriesSignals() {
 		args := &AppendEntriesArgs{}
 		args.Term = rf.perState.currentTerm
 		args.LeaderId = rf.me
+		DPrintf("send Append Entries Signals\n")
+		if !AssertBigger(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] should be larger than zero") {
+			continue
+		}
 		args.PrevLogIndex = rf.volStateOnLdr.nextIndex[server] - 1
 		args.PrevLogTerm = rf.perState.logs[args.PrevLogIndex].LogTerm
 		args.Entries = rf.perState.logs[rf.volStateOnLdr.nextIndex[server]:]
@@ -409,7 +436,7 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	term := rf.perState.currentTerm
-	index := len(rf.perState.logs)
+	index := rf.getNextTryIndex()
 	isLeader := rf.serverState == Leader
 
 	if isLeader {
@@ -441,6 +468,7 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) killed() bool {
+	DPrintf("rf: %d has been killed\n", rf.me)
 	z := atomic.LoadInt32(&rf.dead)
 	return z == 1
 }
@@ -452,11 +480,14 @@ func (rf *Raft) ticker() {
 		// Your code here to check if a leader election should
 		// be started and to randomize sleeping time using
 		// time.Sleep().
+		rf.mu.Lock()
 		switch rf.serverState {
 		case Leader:
+			rf.mu.Unlock()
 			go rf.sendAppendEntriesSignals()
 			time.Sleep(AppendEntryInterval)
 		case Follower:
+			rf.mu.Unlock()
 			select {
 			case <-rf.grantVote:
 			case <-rf.heartBeat:
@@ -466,7 +497,8 @@ func (rf *Raft) ticker() {
 				rf.mu.Unlock()
 			}
 		case Candidate:
-			rf.mu.Lock()
+			// rf.mu.Unlock()
+			// rf.mu.Lock()
 			rf.perState.voteFor = rf.me
 			rf.perState.currentTerm++
 			rf.perState.voteCnt = 1
