@@ -157,6 +157,7 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	// if split vote, the action in this branch is necessary
+	// in this branch, rf's serverState is follower or candidate or leader
 	if args.Term > rf.perState.currentTerm {
 		rf.serverState = Follower
 		rf.perState.currentTerm = args.Term
@@ -245,11 +246,11 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 }
 
 func (rf *Raft) sendRequestVotes() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
 		return
 	}
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	requestVoteArgs := &RequestVoteArgs{}
 	requestVoteArgs.Term = rf.perState.currentTerm
 	requestVoteArgs.CandidateId = rf.me
@@ -406,10 +407,10 @@ func (rf *Raft) sendAppendEntriesSignals() {
 func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	term := rf.perState.currentTerm
 	index := len(rf.perState.logs)
 	isLeader := rf.serverState == Leader
-	rf.mu.Unlock()
 
 	if isLeader {
 		go func(rf *Raft) {
