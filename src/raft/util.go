@@ -21,20 +21,6 @@ func AssertEqual(a interface{}, b interface{}, msg string) bool {
 	return a == b
 }
 
-func (rf *Raft) getLastLogTerm() int {
-	lens := len(rf.perState.logs)
-	return rf.perState.logs[lens-1].LogTerm
-}
-
-func (rf *Raft) getLastLogIndex() int {
-	lens := len(rf.perState.logs)
-	return rf.perState.logs[lens-1].LogIndex
-}
-
-func (rf *Raft) getNextTryIndex() int {
-	return len(rf.perState.logs)
-}
-
 func Min(x, y int) int {
 	if x < y {
 		return x

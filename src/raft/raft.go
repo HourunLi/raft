@@ -35,6 +35,31 @@ import (
 	"6.824/labrpc"
 )
 
+func (rf *Raft) getLastLogTerm() int {
+	lens := len(rf.perState.logs)
+	return rf.perState.logs[lens-1].LogTerm
+}
+
+func (rf *Raft) getLastLogIndex() int {
+	lens := len(rf.perState.logs)
+	return rf.perState.logs[lens-1].LogIndex
+}
+
+func (rf *Raft) getNextTryIndex() int {
+	return len(rf.perState.logs)
+}
+
+//judge whether RequestVoteArgs is at least as new as rf's state
+func (rf *Raft) argsIsUpToDate(args *RequestVoteArgs) bool {
+	lastTerm := rf.getLastLogTerm()
+	lastIndex := rf.getLastLogIndex()
+	if lastTerm < args.Term ||
+		(lastTerm == args.Term && lastIndex <= args.LastLogIndex) {
+		return true
+	}
+	return false
+}
+
 // return currentTerm and whether this server
 // believes it is the leader.
 func (rf *Raft) GetState() (int, bool) {
@@ -118,33 +143,28 @@ func (rf *Raft) applyLogs() {
 }
 
 //
-//judge whether RequestVoteArgs is at least as new as rf's state
-//
-func (rf *Raft) argsIsUpToDate(args *RequestVoteArgs) bool {
-	lastTerm := rf.getLastLogTerm()
-	lastIndex := rf.getLastLogIndex()
-	if lastTerm < args.Term ||
-		(lastTerm == args.Term && lastIndex <= args.LastLogIndex) {
-		return true
-	}
-	return false
-}
-
-//
 // example RequestVote RPC handler.
 //
 func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	// reject stale vote request
 	if args.Term < rf.perState.currentTerm {
 		reply.Term = rf.perState.currentTerm
 		reply.VoteGranted = false
 		return
 	}
-	rf.perState.currentTerm = args.Term
+
+	// if split vote, the action in this branch is necessary
+	if args.Term > rf.perState.currentTerm {
+		rf.serverState = Follower
+		rf.perState.currentTerm = args.Term
+		rf.perState.voteFor = -1
+	}
+
 	reply.Term = args.Term
-	rf.serverState = Follower
+
 	if (rf.perState.voteFor == -1 || rf.perState.voteFor == args.CandidateId) && rf.argsIsUpToDate(args) {
 		rf.perState.voteFor = args.CandidateId
 		reply.VoteGranted = true
@@ -211,7 +231,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 					// rf.volStateOnLdr = VolatileStateOnLeaders{}
 					rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
 					rf.volStateOnLdr.nextIndex = make([]int, len(rf.peers))
-					tmp := len(rf.perState.logs)
+					tmp := rf.getNextTryIndex()
 					DPrintf("%d\n", tmp)
 					for i := range rf.peers {
 						rf.volStateOnLdr.nextIndex[i] = tmp
@@ -492,7 +512,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.volStateOnSer.applyIndex = 0
 	rf.volStateOnSer.commitIndex = 0
 
-	// volatile state on leader initialization until the rf server becomes leader
+	// volatile state on leader initialization vacancy until the rf server becomes leader
 	// ! attention: not initialized
 	// rf.volStateOnLdr.matchIndex = make([]int, len(peers))
 	// rf.volStateOnLdr.nextIndex = make([]int, len(peers))
