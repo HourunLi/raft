@@ -3,9 +3,7 @@ package main
 import "fmt"
 
 func main() {
-	tmp := make([]int, 0)
-	for i := range tmp {
-		fmt.Println(i)
-	}
+	tmp := make([]int, 1)
+	fmt.Println(tmp[1:1])
 	return
 }

@@ -186,6 +186,8 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 //
 func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *RequestVoteReply) bool {
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") {
 		return ok
 	}
@@ -199,12 +201,16 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 			rf.perState.voteFor = -1
 			return ok
 		}
+		// if reply term and rf term is the same
+		// it means the server gets the vote request in the present vote round
 		if reply.Term == rf.perState.currentTerm {
 			if reply.VoteGranted {
 				rf.perState.voteCnt++
 				if rf.perState.voteCnt > len(rf.peers)/2 {
 					rf.serverState = Leader
-					rf.volStateOnLdr = VolatileStateOnLeaders{}
+					// rf.volStateOnLdr = VolatileStateOnLeaders{}
+					rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
+					rf.volStateOnLdr.nextIndex = make([]int, len(rf.peers))
 					tmp := len(rf.perState.logs)
 					DPrintf("%d\n", tmp)
 					for i := range rf.peers {
@@ -236,6 +242,7 @@ func (rf *Raft) sendRequestVotes() {
 	}
 }
 
+// candidate: get the heartbeat, switch identity to follower and fresh term etc.
 func (rf *Raft) appendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
@@ -341,11 +348,11 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 // Leader send append entries to the followers
 //
 func (rf *Raft) sendAppendEntriesSignals() {
+	rf.mu.Lock()
+	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") {
 		return
 	}
-	rf.mu.Lock()
-	defer rf.mu.Unlock()
 	for server := range rf.peers {
 		if server == rf.me {
 			continue
@@ -433,7 +440,7 @@ func (rf *Raft) ticker() {
 			case <-rf.grantVote:
 			case <-rf.heartBeat:
 			case <-time.After(electionTimeout()):
-				rf.mu.Lock()
+				rf.mu.Lock() // necessary to lock?
 				rf.serverState = Candidate
 				rf.mu.Unlock()
 			}
@@ -447,7 +454,7 @@ func (rf *Raft) ticker() {
 
 			select {
 			case <-rf.heartBeat:
-				rf.mu.Lock()
+				rf.mu.Lock() // necessary to lock?
 				rf.serverState = Follower
 				rf.mu.Unlock()
 			case <-rf.winElection:
@@ -475,22 +482,26 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.persister = persister
 	rf.me = me
 	rf.leaderId = -1
-	//for persistent state
 	rf.serverState = Follower
+	// for persistent state
 	rf.perState.currentTerm = 0
 	rf.perState.voteFor = -1
-	rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: 0, LogTerm: 0}) // padding
+	rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: 0, LogTerm: 0, Command: nil}) // padding
 	rf.perState.voteCnt = 0
-	//for volatile state
-	rf.volStateOnSer.applyIndex = -1
-	rf.volStateOnSer.commitIndex = -1
-	rf.volStateOnLdr.matchIndex = make([]int, len(peers)) // ! attention: not initialized
-	rf.volStateOnLdr.nextIndex = make([]int, len(peers))
+	// for volatile state on server
+	rf.volStateOnSer.applyIndex = 0
+	rf.volStateOnSer.commitIndex = 0
+
+	// volatile state on leader initialization until the rf server becomes leader
+	// ! attention: not initialized
+	// rf.volStateOnLdr.matchIndex = make([]int, len(peers))
+	// rf.volStateOnLdr.nextIndex = make([]int, len(peers))
+
+	// for channel
 	rf.applyCh = applyCh
 	rf.heartBeat = make(chan struct{}, CHANSIZE)
 	rf.winElection = make(chan struct{}, CHANSIZE)
 	rf.grantVote = make(chan struct{}, CHANSIZE)
-	// Your initialization code here (2A, 2B, 2C).
 
 	// initialize from state persisted before a crash
 	rf.readPersist(persister.ReadRaftState())
