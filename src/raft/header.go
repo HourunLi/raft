@@ -31,12 +31,12 @@ const (
 const CHANSIZE = 1 << 6
 
 const (
-	AppendEntryInterval = time.Duration(60 * time.Millisecond) //send heartbeat per 0.1s
+	AppendEntryInterval = time.Duration(100 * time.Millisecond) //send heartbeat per 0.1s
 )
 
 //the time limit for each selection round is 0.5-1s
 func electionTimeout() time.Duration {
-	return time.Duration(200 + rand.Intn(300))
+	return time.Duration(210+rand.Intn(400)) * time.Millisecond
 }
 
 // *usage send a ApplyMsg to the service when commiting a new log

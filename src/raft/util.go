@@ -7,7 +7,7 @@ import (
 
 // Debugging
 const (
-	Debug   = false
+	Debug   = true
 	Verbose = true
 )
 

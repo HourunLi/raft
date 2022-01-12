@@ -54,6 +54,7 @@ func (rf *Raft) getNextTryIndex() int {
 func (rf *Raft) argsIsUpToDate(args *RequestVoteArgs) bool {
 	lastTerm := rf.getLastLogTerm()
 	lastIndex := rf.getLastLogIndex()
+	DPrintf("argsIsUpToDate: lastTerm: %d, lastIndex: %d", lastTerm, lastIndex)
 	if lastTerm < args.LastLogTerm ||
 		(lastTerm == args.LastLogTerm && lastIndex <= args.LastLogIndex) {
 		return true
@@ -171,14 +172,13 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	}
 
 	reply.Term = args.Term
+	reply.VoteGranted = false
 
 	if (rf.perState.voteFor == -1 || rf.perState.voteFor == args.CandidateId) && rf.argsIsUpToDate(args) {
 		rf.perState.voteFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.grantVote <- struct{}{}
-		return
 	}
-	reply.VoteGranted = false
 	return
 }
 
@@ -216,10 +216,7 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") ||
-		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") {
-		return ok
-	}
-	if rf.killed() {
+		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") || rf.killed() {
 		return ok
 	}
 	if ok {
@@ -231,30 +228,30 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 		}
 		// if reply term and rf term is the same
 		// it means the server gets the vote request in the present vote round
-		if reply.Term == rf.perState.currentTerm {
-			if reply.VoteGranted {
-				rf.perState.voteCnt++
-				if rf.perState.voteCnt > len(rf.peers)/2 {
-					// rf.volStateOnLdr = VolatileStateOnLeaders{}
-					rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
-					rf.volStateOnLdr.nextIndex = make([]int, len(rf.peers))
-					tmp := rf.getNextTryIndex()
-					for i := range rf.peers {
-						rf.volStateOnLdr.nextIndex[i] = tmp
-						AssertNotEqual(rf.volStateOnLdr.nextIndex[i], 0, "rf.volStateOnLdr.nextIndex[i] is zero")
-					}
-					rf.serverState = Leader
-					rf.winElection <- struct{}{}
+		// if reply.Term == rf.perState.currentTerm {
+		if reply.VoteGranted {
+			rf.perState.voteCnt++
+			if rf.perState.voteCnt > len(rf.peers)/2 {
+				// rf.volStateOnLdr = VolatileStateOnLeaders{}
+				rf.serverState = Leader
+				rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
+				rf.volStateOnLdr.nextIndex = make([]int, len(rf.peers))
+				tmp := rf.getNextTryIndex()
+				for i := range rf.peers {
+					rf.volStateOnLdr.nextIndex[i] = tmp
+					AssertNotEqual(rf.volStateOnLdr.nextIndex[i], 0, "rf.volStateOnLdr.nextIndex[i] is zero")
 				}
+				rf.winElection <- struct{}{}
 			}
 		}
+		// }
 	}
 	return ok
 }
 
 func (rf *Raft) sendRequestVotes() {
 	rf.mu.Lock()
-	defer rf.mu.Unlock()
+	// defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") || rf.killed() {
 		return
 	}
@@ -263,13 +260,16 @@ func (rf *Raft) sendRequestVotes() {
 	requestVoteArgs.CandidateId = rf.me
 	requestVoteArgs.LastLogIndex = rf.getLastLogIndex()
 	requestVoteArgs.LastLogTerm = rf.getLastLogTerm()
+	rf.mu.Unlock()
 	for server := range rf.peers {
-		if server != rf.me {
-			if rf.killed() {
-				return
-			}
-			go rf.sendRequestVote(server, requestVoteArgs, &RequestVoteReply{})
+		if server == rf.me {
+			continue
 		}
+		DPrintf("send request vote to %d  requestVoteArgs: %#v\n", server, requestVoteArgs)
+		// if rf.killed() {
+		// 	return
+		// }
+		go rf.sendRequestVote(server, requestVoteArgs, &RequestVoteReply{})
 	}
 	return
 }
@@ -282,12 +282,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	if rf.killed() {
 		return
 	}
+	reply.Succeed = false
 	// The append request is stale due to sluggish or diordered network
 	if args.Term < rf.perState.currentTerm {
 		reply.Term = rf.perState.currentTerm
 		reply.Succeed = false
 		reply.NextTryIndex = rf.getNextTryIndex()
-		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 279\n")
+		// AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 279\n")
 		return
 	}
 
@@ -314,7 +315,7 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// If the term is inconsistent, then the entries in this term is also inconsistent
 	// So bypass all the entries in the inconsistent term every time to speed up
-	if args.PrevLogIndex > 0 && args.PrevLogTerm != rf.perState.logs[args.PrevLogIndex].LogTerm {
+	if args.PrevLogIndex >= 0 && args.PrevLogTerm != rf.perState.logs[args.PrevLogIndex].LogTerm {
 		term := rf.perState.logs[args.PrevLogIndex].LogTerm
 		for i := args.PrevLogIndex; i >= 0; i-- {
 			if rf.perState.logs[i].LogTerm == term {
@@ -366,6 +367,7 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 		return ok
 	}
 	// if reply.Term == rf.perState.currentTerm {
+
 	if reply.Succeed {
 		lens := len(args.Entries)
 		if lens > 0 {
@@ -375,10 +377,11 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 		}
 	} else {
 		DPrintf("set next try index \n")
-		rf.volStateOnLdr.nextIndex[server] = Min(reply.NextTryIndex, rf.getLastLogIndex())
+		rf.volStateOnLdr.nextIndex[server] = Min(reply.NextTryIndex, rf.getNextTryIndex())
 		// rf.volStateOnLdr.nextIndex[server] = Max(1, rf.volStateOnLdr.nextIndex[server])
 		AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
 	}
+
 	// }
 
 	// check commit index
@@ -415,7 +418,7 @@ func (rf *Raft) sendAppendEntriesSignals() {
 		args := &AppendEntriesArgs{}
 		args.Term = rf.perState.currentTerm
 		args.LeaderId = rf.me
-		DPrintf("send Append Entries Signals\n")
+		DPrintf("send Append Entries Signals, %d\n", len(rf.peers))
 		if !AssertBigger(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] should be larger than zero") {
 			continue
 		}
@@ -479,8 +482,10 @@ func (rf *Raft) Kill() {
 }
 
 func (rf *Raft) killed() bool {
-	DPrintf("rf: %d has been killed\n", rf.me)
 	z := atomic.LoadInt32(&rf.dead)
+	if z == 1 {
+		DPrintf("rf: %d has been killed\n", rf.me)
+	}
 	return z == 1
 }
 
@@ -940,6 +945,7 @@ func Make(peers []*labrpc.ClientEnd, me int,
 
 // 	for server := range rf.peers {
 // 		if server != rf.me && rf.state == STATE_CANDIDATE {
+// 			DPrintf("send request vote to %d\n requestVoteArgs: %#v\n", server, args)
 // 			go rf.sendRequestVote(server, args, &RequestVoteReply{})
 // 		}
 // 	}
@@ -1359,7 +1365,9 @@ func Make(peers []*labrpc.ClientEnd, me int,
 // }
 
 // func (rf *Raft) killed() bool {
-// 	DPrintf("rf: %d has been killed\n", rf.me)
 // 	z := atomic.LoadInt32(&rf.dead)
+// 	if z == 1 {
+// 		DPrintf("rf: %d has been killed\n", rf.me)
+// 	}
 // 	return z == 1
 // }
