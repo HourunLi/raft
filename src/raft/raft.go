@@ -146,6 +146,7 @@ func (rf *Raft) applyLogs() {
 		}
 		rf.volStateOnSer.applyIndex = i
 	}
+	// rf.volStateOnSer.applyIndex = rf.volStateOnSer.commitIndex
 	return
 }
 
@@ -366,23 +367,21 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 		rf.perState.currentTerm = reply.Term
 		return ok
 	}
-	// if reply.Term == rf.perState.currentTerm {
-
-	if reply.Succeed {
-		lens := len(args.Entries)
-		if lens > 0 {
-			rf.volStateOnLdr.nextIndex[server] = args.Entries[lens-1].LogIndex + 1
+	if reply.Term == rf.perState.currentTerm {
+		if reply.Succeed {
+			lens := len(args.Entries)
+			if lens > 0 {
+				rf.volStateOnLdr.nextIndex[server] = args.Entries[lens-1].LogIndex + 1
+				AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
+				rf.volStateOnLdr.matchIndex[server] = args.Entries[lens-1].LogIndex
+			}
+		} else {
+			DPrintf("set next try index \n")
+			rf.volStateOnLdr.nextIndex[server] = Min(reply.NextTryIndex, rf.getNextTryIndex())
+			// rf.volStateOnLdr.nextIndex[server] = Max(1, rf.volStateOnLdr.nextIndex[server])
 			AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
-			rf.volStateOnLdr.matchIndex[server] = args.Entries[lens-1].LogIndex
 		}
-	} else {
-		DPrintf("set next try index \n")
-		rf.volStateOnLdr.nextIndex[server] = Min(reply.NextTryIndex, rf.getNextTryIndex())
-		// rf.volStateOnLdr.nextIndex[server] = Max(1, rf.volStateOnLdr.nextIndex[server])
-		AssertNotEqual(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] is zero")
 	}
-
-	// }
 
 	// check commit index
 	for cmtIndex := rf.getLastLogIndex(); cmtIndex > rf.volStateOnSer.commitIndex &&
@@ -454,12 +453,12 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	isLeader := rf.serverState == Leader
 
 	if isLeader {
-		go func(rf *Raft) {
-			rf.mu.Lock()
-			defer rf.mu.Unlock()
-			rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: index, LogTerm: term, Command: command})
-			return
-		}(rf)
+		// go func(rf *Raft) {
+		// rf.mu.Lock()
+		// defer rf.mu.Unlock()
+		rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: index, LogTerm: term, Command: command})
+		// return
+		// }(rf)
 	}
 
 	return index, term, isLeader

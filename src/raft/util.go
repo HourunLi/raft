@@ -25,8 +25,7 @@ func (rf *Raft) dump() {
 		if !Verbose {
 			fmt.Println("---------------------------------------------------------")
 			fmt.Printf("raft: %d, serverState: %s\n", rf.me, Name[rf.serverState])
-			fmt.Printf("raft's nextIndex: ")
-			fmt.Println(rf.volStateOnLdr.nextIndex)
+			fmt.Printf("raft's nextIndex: %d", rf.volStateOnLdr.nextIndex)
 		} else {
 			fmt.Printf("%#v\n", rf)
 		}
