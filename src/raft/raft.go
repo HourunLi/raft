@@ -28,26 +28,27 @@ package raft
 import (
 	//	"bytes"
 
+	"bytes"
 	"fmt"
 	"sync/atomic"
 	"time"
 
-	//	"6.824/labgob"
+	"6.824/labgob"
 	"6.824/labrpc"
 )
 
 func (rf *Raft) getLastLogTerm() int {
-	lens := len(rf.perState.logs)
-	return rf.perState.logs[lens-1].LogTerm
+	lens := len(rf.perState.Logs)
+	return rf.perState.Logs[lens-1].LogTerm
 }
 
 func (rf *Raft) getLastLogIndex() int {
-	lens := len(rf.perState.logs)
-	return rf.perState.logs[lens-1].LogIndex
+	lens := len(rf.perState.Logs)
+	return rf.perState.Logs[lens-1].LogIndex
 }
 
 func (rf *Raft) getNextTryIndex() int {
-	return len(rf.perState.logs)
+	return len(rf.perState.Logs)
 }
 
 //judge whether RequestVoteArgs is at least as new as rf's state
@@ -70,7 +71,7 @@ func (rf *Raft) GetState() (int, bool) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	// Your code here (2A).
-	term = rf.perState.currentTerm
+	term = rf.perState.CurrentTerm
 	isleader = rf.serverState == Leader
 	return term, isleader
 }
@@ -81,14 +82,15 @@ func (rf *Raft) GetState() (int, bool) {
 // see paper's Figure 2 for a description of what should be persistent.
 //
 func (rf *Raft) persist() {
-	// Your code here (2C).
-	// Example:
-	// w := new(bytes.Buffer)
-	// e := labgob.NewEncoder(w)
-	// e.Encode(rf.xxx)
-	// e.Encode(rf.yyy)
-	// data := w.Bytes()
-	// rf.persister.SaveRaftState(data)
+	w := new(bytes.Buffer)
+	e := labgob.NewEncoder(w)
+	// e.Encode(rf.perState)
+	e.Encode(rf.perState.CurrentTerm)
+	e.Encode(rf.perState.VoteFor)
+	// e.Encode(rf.perState.VoteCnt)
+	e.Encode(rf.perState.Logs)
+	data := w.Bytes()
+	rf.persister.SaveRaftState(data)
 }
 
 //
@@ -98,19 +100,12 @@ func (rf *Raft) readPersist(data []byte) {
 	if data == nil || len(data) < 1 { // bootstrap without any state?
 		return
 	}
-	// Your code here (2C).
-	// Example:
-	// r := bytes.NewBuffer(data)
-	// d := labgob.NewDecoder(r)
-	// var xxx
-	// var yyy
-	// if d.Decode(&xxx) != nil ||
-	//    d.Decode(&yyy) != nil {
-	//   error...
-	// } else {
-	//   rf.xxx = xxx
-	//   rf.yyy = yyy
-	// }
+	r := bytes.NewBuffer(data)
+	d := labgob.NewDecoder(r)
+	// d.Decode(&rf.perState)
+	d.Decode(&rf.perState.CurrentTerm)
+	d.Decode(&rf.perState.VoteFor)
+	d.Decode(&rf.perState.Logs)
 }
 
 //
@@ -140,7 +135,7 @@ func (rf *Raft) applyLogs() {
 		if rf.killed() {
 			return
 		}
-		msg := ApplyMsg{CommandValid: true, CommandIndex: i, Command: rf.perState.logs[i].Command}
+		msg := ApplyMsg{CommandValid: true, CommandIndex: i, Command: rf.perState.Logs[i].Command}
 		if AssertBigger(i, 0, "applyIndex should larger than zero\n") {
 			rf.applyCh <- msg
 		}
@@ -157,26 +152,27 @@ func (rf *Raft) RequestVote(args *RequestVoteArgs, reply *RequestVoteReply) {
 	// Your code here (2A, 2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 	// reject stale vote request
-	if args.Term < rf.perState.currentTerm {
-		reply.Term = rf.perState.currentTerm
+	if args.Term < rf.perState.CurrentTerm {
+		reply.Term = rf.perState.CurrentTerm
 		reply.VoteGranted = false
 		return
 	}
 
 	// if split vote, the action in this branch is necessary
 	// in this branch, rf's serverState is follower or candidate or leader
-	if args.Term > rf.perState.currentTerm {
+	if args.Term > rf.perState.CurrentTerm {
 		rf.serverState = Follower
-		rf.perState.currentTerm = args.Term
-		rf.perState.voteFor = -1
+		rf.perState.CurrentTerm = args.Term
+		rf.perState.VoteFor = -1
 	}
 
 	reply.Term = args.Term
 	reply.VoteGranted = false
 
-	if (rf.perState.voteFor == -1 || rf.perState.voteFor == args.CandidateId) && rf.argsIsUpToDate(args) {
-		rf.perState.voteFor = args.CandidateId
+	if (rf.perState.VoteFor == -1 || rf.perState.VoteFor == args.CandidateId) && rf.argsIsUpToDate(args) {
+		rf.perState.VoteFor = args.CandidateId
 		reply.VoteGranted = true
 		rf.grantVote <- struct{}{}
 	}
@@ -216,23 +212,24 @@ func (rf *Raft) sendRequestVote(server int, args *RequestVoteArgs, reply *Reques
 	ok := rf.peers[server].Call("Raft.RequestVote", args, reply)
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
+	defer rf.persist()
 	if !AssertEqual(rf.serverState, Candidate, "rf's state should be Candidate\n") ||
-		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's term should equals to args\n") || rf.killed() {
+		!AssertEqual(rf.perState.CurrentTerm, args.Term, "rf's term should equals to args\n") || rf.killed() {
 		return ok
 	}
 	if ok {
-		if reply.Term > rf.perState.currentTerm {
+		if reply.Term > rf.perState.CurrentTerm {
 			rf.serverState = Follower
-			rf.perState.currentTerm = reply.Term
-			rf.perState.voteFor = -1
+			rf.perState.CurrentTerm = reply.Term
+			rf.perState.VoteFor = -1
 			return ok
 		}
 		// if reply term and rf term is the same
 		// it means the server gets the vote request in the present vote round
-		// if reply.Term == rf.perState.currentTerm {
+		// if reply.Term == rf.perState.CurrentTerm {
 		if reply.VoteGranted {
-			rf.perState.voteCnt++
-			if rf.perState.voteCnt > len(rf.peers)/2 {
+			rf.perState.VoteCnt++
+			if rf.perState.VoteCnt > len(rf.peers)/2 {
 				// rf.volStateOnLdr = VolatileStateOnLeaders{}
 				rf.serverState = Leader
 				rf.volStateOnLdr.matchIndex = make([]int, len(rf.peers))
@@ -257,7 +254,7 @@ func (rf *Raft) sendRequestVotes() {
 		return
 	}
 	requestVoteArgs := &RequestVoteArgs{}
-	requestVoteArgs.Term = rf.perState.currentTerm
+	requestVoteArgs.Term = rf.perState.CurrentTerm
 	requestVoteArgs.CandidateId = rf.me
 	requestVoteArgs.LastLogIndex = rf.getLastLogIndex()
 	requestVoteArgs.LastLogTerm = rf.getLastLogTerm()
@@ -279,31 +276,30 @@ func (rf *Raft) sendRequestVotes() {
 func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply) {
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-
 	if rf.killed() {
 		return
 	}
 	reply.Succeed = false
 	// The append request is stale due to sluggish or diordered network
-	if args.Term < rf.perState.currentTerm {
-		reply.Term = rf.perState.currentTerm
+	if args.Term < rf.perState.CurrentTerm {
+		reply.Term = rf.perState.CurrentTerm
 		reply.Succeed = false
 		reply.NextTryIndex = rf.getNextTryIndex()
 		// AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 279\n")
 		return
 	}
 
-	// args.Term == rf.perState.currentTerm is possible
-
+	// args.Term == rf.perState.CurrentTerm is possible
+	defer rf.persist()
 	// maybe rf's state is candidate, which requires to switch state to follower
-	if args.Term > rf.perState.currentTerm {
+	if args.Term > rf.perState.CurrentTerm {
 		rf.serverState = Follower
-		rf.perState.currentTerm = args.Term
-		rf.perState.voteFor = -1
+		rf.perState.CurrentTerm = args.Term
+		rf.perState.VoteFor = -1
 	}
 
 	rf.heartBeat <- struct{}{}
-	reply.Term = rf.perState.currentTerm
+	reply.Term = rf.perState.CurrentTerm
 
 	// if rf's(follower) log is shorter than leader's
 	// then set leader's try index straightly to rf(follower) logs' tail
@@ -316,18 +312,18 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 	// If the term is inconsistent, then the entries in this term is also inconsistent
 	// So bypass all the entries in the inconsistent term every time to speed up
-	if args.PrevLogIndex >= 0 && args.PrevLogTerm != rf.perState.logs[args.PrevLogIndex].LogTerm {
-		term := rf.perState.logs[args.PrevLogIndex].LogTerm
+	if args.PrevLogIndex >= 0 && args.PrevLogTerm != rf.perState.Logs[args.PrevLogIndex].LogTerm {
+		term := rf.perState.Logs[args.PrevLogIndex].LogTerm
 		for i := args.PrevLogIndex; i >= 0; i-- {
-			if rf.perState.logs[i].LogTerm == term {
+			if rf.perState.Logs[i].LogTerm == term {
 				continue
 			}
 			reply.NextTryIndex = i + 1
 			break
 		}
 	} else {
-		rf.perState.logs = rf.perState.logs[:args.PrevLogIndex+1]
-		rf.perState.logs = append(rf.perState.logs, args.Entries...)
+		rf.perState.Logs = rf.perState.Logs[:args.PrevLogIndex+1]
+		rf.perState.Logs = append(rf.perState.Logs, args.Entries...)
 		reply.Succeed = true
 		reply.NextTryIndex = rf.getNextTryIndex()
 		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 320\n")
@@ -344,7 +340,7 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") ||
-		!AssertEqual(rf.perState.currentTerm, args.Term, "rf's current term should be equal to args term\n") ||
+		!AssertEqual(rf.perState.CurrentTerm, args.Term, "rf's current term should be equal to args term\n") ||
 		rf.killed() {
 		return ok
 	}
@@ -361,13 +357,14 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 	}
 	// Network partition may need this branch to handle
 	// Update the term and switch its serverState
-	if reply.Term > rf.perState.currentTerm {
+	if reply.Term > rf.perState.CurrentTerm {
 		rf.serverState = Follower
-		rf.perState.voteFor = -1
-		rf.perState.currentTerm = reply.Term
+		rf.perState.VoteFor = -1
+		rf.perState.CurrentTerm = reply.Term
+		rf.persist()
 		return ok
 	}
-	if reply.Term == rf.perState.currentTerm {
+	if reply.Term == rf.perState.CurrentTerm {
 		if reply.Succeed {
 			lens := len(args.Entries)
 			if lens > 0 {
@@ -385,7 +382,7 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 
 	// check commit index
 	for cmtIndex := rf.getLastLogIndex(); cmtIndex > rf.volStateOnSer.commitIndex &&
-		rf.perState.logs[cmtIndex].LogTerm == rf.perState.currentTerm; cmtIndex-- {
+		rf.perState.Logs[cmtIndex].LogTerm == rf.perState.CurrentTerm; cmtIndex-- {
 		cnt := 1
 		for i := range rf.peers {
 			if i != rf.me && rf.volStateOnLdr.matchIndex[i] >= cmtIndex {
@@ -415,15 +412,15 @@ func (rf *Raft) sendAppendEntriesSignals() {
 			continue
 		}
 		args := &AppendEntriesArgs{}
-		args.Term = rf.perState.currentTerm
+		args.Term = rf.perState.CurrentTerm
 		args.LeaderId = rf.me
 		DPrintf("send Append Entries Signals, %d\n", len(rf.peers))
 		if !AssertBigger(rf.volStateOnLdr.nextIndex[server], 0, "rf.volStateOnLdr.nextIndex[server] should be larger than zero") {
 			continue
 		}
 		args.PrevLogIndex = rf.volStateOnLdr.nextIndex[server] - 1
-		args.PrevLogTerm = rf.perState.logs[args.PrevLogIndex].LogTerm
-		args.Entries = rf.perState.logs[rf.volStateOnLdr.nextIndex[server]:]
+		args.PrevLogTerm = rf.perState.Logs[args.PrevLogIndex].LogTerm
+		args.Entries = rf.perState.Logs[rf.volStateOnLdr.nextIndex[server]:]
 		args.LeaderCommit = rf.volStateOnSer.commitIndex
 		go rf.sendAppendEntriesSignal(server, args, &AppendEntriesReply{})
 	}
@@ -448,7 +445,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 	// Your code here (2B).
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
-	term := rf.perState.currentTerm
+
+	term := rf.perState.CurrentTerm
 	index := rf.getNextTryIndex()
 	isLeader := rf.serverState == Leader
 
@@ -456,7 +454,8 @@ func (rf *Raft) Start(command interface{}) (int, int, bool) {
 		// go func(rf *Raft) {
 		// rf.mu.Lock()
 		// defer rf.mu.Unlock()
-		rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: index, LogTerm: term, Command: command})
+		rf.perState.Logs = append(rf.perState.Logs, LogEntry{LogIndex: index, LogTerm: term, Command: command})
+		rf.persist()
 		// return
 		// }(rf)
 	}
@@ -514,9 +513,10 @@ func (rf *Raft) ticker() {
 		case Candidate:
 			// rf.mu.Unlock()
 			// rf.mu.Lock()
-			rf.perState.voteFor = rf.me
-			rf.perState.currentTerm++
-			rf.perState.voteCnt = 1
+			rf.perState.VoteFor = rf.me
+			rf.perState.CurrentTerm++
+			rf.perState.VoteCnt = 1
+			rf.persist()
 			rf.mu.Unlock()
 			go rf.sendRequestVotes() // send request votes
 
@@ -553,10 +553,10 @@ func Make(peers []*labrpc.ClientEnd, me int,
 	rf.leaderId = -1
 	rf.serverState = Follower
 	// for persistent state
-	rf.perState.currentTerm = 0
-	rf.perState.voteFor = -1
-	rf.perState.logs = append(rf.perState.logs, LogEntry{LogIndex: 0, LogTerm: 0, Command: nil}) // padding
-	rf.perState.voteCnt = 0
+	rf.perState.CurrentTerm = 0
+	rf.perState.VoteFor = -1
+	rf.perState.Logs = append(rf.perState.Logs, LogEntry{LogIndex: 0, LogTerm: 0, Command: nil}) // padding
+	rf.perState.VoteCnt = 0
 	// for volatile state on server
 	rf.volStateOnSer.applyIndex = 0
 	rf.volStateOnSer.commitIndex = 0
@@ -1271,8 +1271,8 @@ func Make(peers []*labrpc.ClientEnd, me int,
 // 			case <-time.After(time.Millisecond * time.Duration(rand.Intn(300)+200)):
 // 				rf.mu.Lock()
 // 				rf.state = STATE_CANDIDATE
-// 				rf.mu.Unlock()
 // 				rf.persist()
+// 				rf.mu.Unlock()
 // 			}
 // 		case STATE_LEADER:
 // 			rf.mu.Unlock()

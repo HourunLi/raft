@@ -31,12 +31,12 @@ const (
 const CHANSIZE = 1 << 6
 
 const (
-	AppendEntryInterval = time.Duration(100 * time.Millisecond) //send heartbeat per 0.1s
+	AppendEntryInterval = time.Duration(200 * time.Millisecond) //send heartbeat per 0.1s
 )
 
 //the time limit for each selection round is 0.5-1s
 func electionTimeout() time.Duration {
-	return time.Duration(210+rand.Intn(400)) * time.Millisecond
+	return time.Duration(500+rand.Intn(400)) * time.Millisecond
 }
 
 // *usage send a ApplyMsg to the service when commiting a new log
@@ -95,10 +95,10 @@ type LogEntry struct {
 }
 
 type PersistState struct {
-	currentTerm int        // latest term server has seen
-	voteFor     int        // candidateId that received vote in current term
-	voteCnt     int        // the number of votes got
-	logs        []LogEntry // log entries;
+	CurrentTerm int        // latest term server has seen
+	VoteFor     int        // candidateId that received vote in current term
+	VoteCnt     int        // the number of votes got
+	Logs        []LogEntry // log entries;
 }
 
 type VolatileStateOnServers struct {
