@@ -1,0 +1,141 @@
+Test (2C): basic persistence ...
+labgob warning: Decoding into a non-default variable/field int may not work
+  ... Passed --   6.8  3   76   19149    6
+Test (2C): more persistence ...
+  ... Passed --  21.5  5  732  166004   16
+Test (2C): partitioned leader and one follower crash, leader restarts ...
+  ... Passed --   3.7  3   32    8043    4
+Test (2C): Figure 8 ...
+  ... Passed --  36.7  5  508  101324   19
+Test (2C): unreliable agreement ...
+  ... Passed --   9.0  5  220   80233  246
+Test (2C): Figure 8 (unreliable) ...
+  ... Passed --  45.6  5 2528 4947287  211
+Test (2C): churn ...
+==================
+WARNING: DATA RACE
+Write at 0x00c0002ad820 by goroutine 37:
+  runtime.slicecopy()
+      D:/GO/src/runtime/slice.go:284 +0x0
+  6.824/raft.(*Raft).AppendEntries()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:412 +0x82c
+  runtime.call32()
+      D:/GO/src/runtime/asm_amd64.s:626 +0x4f
+  reflect.Value.Call()
+      D:/GO/src/reflect/value.go:339 +0xd7
+  6.824/labrpc.(*Service).dispatch()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:497 +0x49b
+  6.824/labrpc.(*Server).dispatch()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:421 +0x265
+  6.824/labrpc.(*Network).processReq.func1()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:241 +0x9c
+
+Previous read at 0x00c0002ad820 by goroutine 325:
+  reflect.Value.Int()
+      D:/GO/src/reflect/value.go:1324 +0xa6
+  encoding/gob.encInt()
+      D:/GO/src/encoding/gob/encode.go:188 +0x80
+  encoding/gob.(*Encoder).encodeStruct()
+      D:/GO/src/encoding/gob/encode.go:328 +0x569
+  encoding/gob.encOpFor.func4()
+      D:/GO/src/encoding/gob/encode.go:581 +0x168
+  encoding/gob.(*Encoder).encodeArray()
+      D:/GO/src/encoding/gob/encode.go:351 +0x39a
+  encoding/gob.encOpFor.func1()
+      D:/GO/src/encoding/gob/encode.go:551 +0x215
+  encoding/gob.(*Encoder).encodeStruct()
+      D:/GO/src/encoding/gob/encode.go:328 +0x569
+  encoding/gob.(*Encoder).encode()
+      D:/GO/src/encoding/gob/encode.go:701 +0x28d
+  encoding/gob.(*Encoder).EncodeValue()
+      D:/GO/src/encoding/gob/encoder.go:251 +0x72f
+  encoding/gob.(*Encoder).Encode()
+      D:/GO/src/encoding/gob/encoder.go:176 +0x152
+  6.824/labgob.(*LabEncoder).Encode()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labgob/labgob.go:34 +0x5e
+  6.824/labrpc.(*ClientEnd).Call()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:94 +0x191
+  6.824/raft.(*Raft).sendAppendEntriesSignal()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:429 +0xed
+  6.824/raft.(*Raft).sendAppendEntriesSignals路dwrap路26()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:521 +0x64
+
+Goroutine 37 (running) created at:
+  6.824/labrpc.(*Network).processReq()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:240 +0x293
+  6.824/labrpc.MakeNetwork.func1路dwrap路1()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:158 +0x9c
+
+Goroutine 325 (running) created at:
+  6.824/raft.(*Raft).sendAppendEntriesSignals()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:521 +0x834
+  6.824/raft.(*Raft).ticker路dwrap路29()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:609 +0x39
+==================
+==================
+WARNING: DATA RACE
+Write at 0x00c0002ad830 by goroutine 37:
+  runtime.slicecopy()
+      D:/GO/src/runtime/slice.go:284 +0x0
+  6.824/raft.(*Raft).AppendEntries()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:412 +0x82c
+  runtime.call32()
+      D:/GO/src/runtime/asm_amd64.s:626 +0x4f
+  reflect.Value.Call()
+      D:/GO/src/reflect/value.go:339 +0xd7
+  6.824/labrpc.(*Service).dispatch()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:497 +0x49b
+  6.824/labrpc.(*Server).dispatch()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:421 +0x265
+  6.824/labrpc.(*Network).processReq.func1()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:241 +0x9c
+
+Previous read at 0x00c0002ad830 by goroutine 325:
+  reflect.Value.IsNil()
+      D:/GO/src/reflect/value.go:1425 +0xe4
+  encoding/gob.encOpFor.func5()
+      D:/GO/src/encoding/gob/encode.go:585 +0x51
+  encoding/gob.(*Encoder).encodeStruct()
+      D:/GO/src/encoding/gob/encode.go:328 +0x569
+  encoding/gob.encOpFor.func4()
+      D:/GO/src/encoding/gob/encode.go:581 +0x168
+  encoding/gob.(*Encoder).encodeArray()
+      D:/GO/src/encoding/gob/encode.go:351 +0x39a
+  encoding/gob.encOpFor.func1()
+      D:/GO/src/encoding/gob/encode.go:551 +0x215
+  encoding/gob.(*Encoder).encodeStruct()
+      D:/GO/src/encoding/gob/encode.go:328 +0x569
+  encoding/gob.(*Encoder).encode()
+      D:/GO/src/encoding/gob/encode.go:701 +0x28d
+  encoding/gob.(*Encoder).EncodeValue()
+      D:/GO/src/encoding/gob/encoder.go:251 +0x72f
+  encoding/gob.(*Encoder).Encode()
+      D:/GO/src/encoding/gob/encoder.go:176 +0x152
+  6.824/labgob.(*LabEncoder).Encode()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labgob/labgob.go:34 +0x5e
+  6.824/labrpc.(*ClientEnd).Call()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:94 +0x191
+  6.824/raft.(*Raft).sendAppendEntriesSignal()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:429 +0xed
+  6.824/raft.(*Raft).sendAppendEntriesSignals路dwrap路26()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:521 +0x64
+
+Goroutine 37 (running) created at:
+  6.824/labrpc.(*Network).processReq()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:240 +0x293
+  6.824/labrpc.MakeNetwork.func1路dwrap路1()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/labrpc/labrpc.go:158 +0x9c
+
+Goroutine 325 (running) created at:
+  6.824/raft.(*Raft).sendAppendEntriesSignals()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:521 +0x834
+  6.824/raft.(*Raft).ticker路dwrap路29()
+      E:/JuniorTerm1/ParallelComputing/homework_dis/LabRaft/6.824-lab/src/raft/raft.go:609 +0x39
+==================
+--- FAIL: TestReliableChurn2C (16.71s)
+    testing.go:1152: race detected during execution of test
+Test (2C): unreliable churn ...
+  ... Passed --  16.4  5  400  212764  146
+FAIL
+exit status 1
+FAIL	6.824/raft	156.919s

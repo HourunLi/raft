@@ -31,12 +31,12 @@ const (
 const CHANSIZE = 1 << 6
 
 const (
-	AppendEntryInterval = time.Duration(200 * time.Millisecond) //send heartbeat per 0.1s
+	AppendEntryInterval = time.Duration(100 * time.Millisecond) //send heartbeat per 0.1s
 )
 
 //the time limit for each selection round is 0.5-1s
 func electionTimeout() time.Duration {
-	return time.Duration(500+rand.Intn(400)) * time.Millisecond
+	return time.Duration(800+rand.Intn(800)) * time.Millisecond
 }
 
 // *usage send a ApplyMsg to the service when commiting a new log
@@ -86,6 +86,18 @@ type RequestVoteReply struct {
 	// Your data here (2A).
 	Term        int  // currentTerm, for candidate to update itself
 	VoteGranted bool // true means candidate received vote
+}
+
+type InstallSnapshotArgs struct {
+	Term              int
+	LeaderId          int
+	LastIncludedIndex int
+	LastIncludedTerm  int
+	Data              []byte
+}
+
+type InstallSnapshotReply struct {
+	Term int
 }
 
 type LogEntry struct {
