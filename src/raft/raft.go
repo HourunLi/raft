@@ -35,7 +35,6 @@ package raft
 
 import (
 	"bytes"
-	"fmt"
 	"sync/atomic"
 	"time"
 
@@ -351,7 +350,6 @@ func (rf *Raft) sendRequestVotes() {
 		if server == rf.me {
 			continue
 		}
-		DPrintf("send request vote to %d  requestVoteArgs: %#v\n", server, requestVoteArgs)
 		go rf.sendRequestVote(server, requestVoteArgs, &RequestVoteReply{})
 	}
 	return
@@ -390,7 +388,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 	// then set leader's try index straightly to rf(follower) logs' tail
 	if args.PrevLogIndex > rf.getLastLogIndex() {
 		reply.NextTryIndex = rf.getNextTryIndex()
-		AssertNotEqual(reply.NextTryIndex, 0, "reply.NextTryIndex is zero at 299\n")
 		reply.Succeed = false
 		return
 	}
@@ -407,17 +404,13 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 			reply.NextTryIndex = i + 1
 			break
 		}
-	} else if args.PrevLogIndex >= firstLogIndex { // ! attention !!!
+	} else if args.PrevLogIndex >= firstLogIndex {
 		rf.perState.Logs = rf.perState.Logs[:args.PrevLogIndex-firstLogIndex+1]
-		// rf.perState.Logs = append(rf.perState.Logs, args.Entries...)
-		for i := 0; i < len(args.Entries); i++ {
-			rf.perState.Logs = append(rf.perState.Logs, args.Entries[i])
-		}
+		rf.perState.Logs = append(rf.perState.Logs, args.Entries...)
 		reply.Succeed = true
 		reply.NextTryIndex = rf.getNextTryIndex()
 		if rf.volStateOnSer.commitIndex < args.LeaderCommit {
 			rf.volStateOnSer.commitIndex = Min(args.LeaderCommit, rf.getLastLogIndex())
-			// go rf.applyLogs()
 		}
 	} else {
 		// this siatuation is impossible???
@@ -430,9 +423,6 @@ func (rf *Raft) AppendEntries(args *AppendEntriesArgs, reply *AppendEntriesReply
 
 func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, reply *AppendEntriesReply) bool {
 	ok := rf.peers[server].Call("Raft.AppendEntries", args, reply)
-	// if INFO {
-	// 	fmt.Printf("sendAppendEntriesSignal args: %p\n", args)
-	// }
 	rf.mu.Lock()
 	defer rf.mu.Unlock()
 	if !AssertEqual(rf.serverState, Leader, "rf's state should be Leader\n") ||
@@ -444,12 +434,6 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 	if !ok {
 		DPrintf("sendAppendEntriesSignal Failed\n")
 		return ok
-	}
-
-	if Debug {
-		fmt.Printf("sendAppendEntriesSignal to %d\n", server)
-		dumpArgs(*args)
-		dumpArgs(*reply)
 	}
 	// Network partition may need this branch to handle
 	// Update the term and switch its serverState
@@ -486,7 +470,6 @@ func (rf *Raft) sendAppendEntriesSignal(server int, args *AppendEntriesArgs, rep
 		}
 		if cnt > len(rf.peers)/2 {
 			rf.volStateOnSer.commitIndex = cmtIndex
-			// go rf.applyLogs()
 			break
 		}
 	}
@@ -513,7 +496,6 @@ func (rf *Raft) sendAppendEntriesSignals() {
 			args := &AppendEntriesArgs{}
 			args.Term = rf.perState.CurrentTerm
 			args.LeaderId = rf.me
-			DPrintf("send Append Entries Signals, %d\n", len(rf.peers))
 
 			args.PrevLogIndex = rf.volStateOnLdr.nextIndex[server] - 1
 			if args.PrevLogIndex >= firstLogIndex {
